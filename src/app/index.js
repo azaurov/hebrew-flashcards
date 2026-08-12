@@ -462,6 +462,10 @@ const COLORS = {
 
 const HEB_FONT = Platform.select({ ios: 'Times New Roman', android: 'serif', default: 'serif' });
 
+// Cloudflare Worker proxying ElevenLabs TTS (web only) — see worker/src/index.js.
+// Native platforms keep using the device's TextToSpeech engine via expo-speech.
+const TTS_PROXY_URL = 'https://hebrew-flashcards-tts.azaurov.workers.dev';
+
 // Mirrors the original CSS clamp(min, vw%, max) rules so glyphs scale with
 // screen width the same way the WebView version did.
 function clampSize(min, vwPercent, max, width){
@@ -531,30 +535,52 @@ export default function App() {
   const card = queue[idx];
   const rev = reverse && deck.vocab;
 
+  // Browser/OS voices vary wildly (some devices only expose one Hebrew
+  // voice, and it can mispronounce letters like resh) — used only as a
+  // fallback if the TTS proxy is unreachable (e.g. offline).
+  function speakWithBrowserVoice(text) {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new window.SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    const match = hebrewVoice ? voices.find((v) => v.voiceURI === hebrewVoice) : null;
+    utterance.voice = match || null;
+    utterance.lang = match ? match.lang : 'he-IL';
+    utterance.rate = 0.85;
+    setSpeaking(true);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  }
+
   function speak(text) {
     if (!text) return;
 
-    // expo-speech's web shim resolves `voice` by matching voiceURI, but
-    // silently falls back to voices[0] (Math.max(0, -1)) when the match
-    // fails instead of leaving the default voice alone — which is exactly
-    // how a bad voice slips back in after a page reload. Bypass it on web
-    // and set the SpeechSynthesisVoice object directly, so a failed match
-    // just means "no explicit voice" instead of "wrong voice picked".
     if (Platform.OS === 'web') {
-      if (!window.speechSynthesis) return;
-      window.speechSynthesis.cancel();
-      const utterance = new window.SpeechSynthesisUtterance(text);
-      const voices = window.speechSynthesis.getVoices();
-      const match = hebrewVoice ? voices.find((v) => v.voiceURI === hebrewVoice) : null;
-      utterance.voice = match || null;
-      utterance.lang = match ? match.lang : 'he-IL';
-      utterance.rate = 0.85;
-      const hebCount = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('he')).length;
-      setDone(`voice: ${match ? match.name : 'default'} (${hebCount} he voices, wanted ${hebrewVoice || 'none'})`);
       setSpeaking(true);
-      utterance.onend = () => setSpeaking(false);
-      utterance.onerror = () => setSpeaking(false);
-      window.speechSynthesis.speak(utterance);
+      setDone('');
+      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
+          return res.blob();
+        })
+        .then((blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const audio = new window.Audio(url);
+          audio.onended = () => {
+            setSpeaking(false);
+            window.URL.revokeObjectURL(url);
+          };
+          audio.onerror = () => {
+            setSpeaking(false);
+            window.URL.revokeObjectURL(url);
+          };
+          audio.play();
+        })
+        .catch(() => {
+          setDone('Using device voice (audio service unreachable).');
+          speakWithBrowserVoice(text);
+        });
       return;
     }
 
