@@ -571,6 +571,23 @@ export default function App() {
     if (Platform.OS === 'web') {
       setSpeaking(true);
       setDone('');
+
+      // Safari (notably iOS) generally requires audio.play() to happen
+      // synchronously inside the user-gesture call stack — a play() called
+      // later, after an async fetch resolves, can get silently blocked.
+      // Priming an <audio> element with play() right here, before the
+      // fetch even starts, keeps it "unlocked" for the real playback once
+      // its src is set below. Chrome/Android didn't surface this because
+      // it's more lenient about deferred gesture-linked playback.
+      const audio = new window.Audio();
+      try {
+        const primePromise = audio.play();
+        if (primePromise && primePromise.catch) primePromise.catch(() => {});
+      } catch {
+        // Playing with no source throws synchronously in some browsers —
+        // fine, the element is still primed for the src swap below.
+      }
+
       fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`)
         .then((res) => {
           if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
@@ -578,7 +595,7 @@ export default function App() {
         })
         .then((blob) => {
           const url = window.URL.createObjectURL(blob);
-          const audio = new window.Audio(url);
+          audio.src = url;
           audio.onended = () => {
             setSpeaking(false);
             window.URL.revokeObjectURL(url);
@@ -587,9 +604,17 @@ export default function App() {
             setSpeaking(false);
             window.URL.revokeObjectURL(url);
           };
-          audio.play();
+          const playPromise = audio.play();
+          if (playPromise && playPromise.catch) {
+            playPromise.catch(() => {
+              setSpeaking(false);
+              setDone('Using device voice (playback blocked).');
+              speakWithBrowserVoice(text);
+            });
+          }
         })
         .catch(() => {
+          setSpeaking(false);
           setDone('Using device voice (audio service unreachable).');
           speakWithBrowserVoice(text);
         });
