@@ -1,183 +1,20 @@
-import { useEffect, useRef, useState } from 'react';
-import { StatusBar, StyleSheet } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Animated,
+  Dimensions,
+  Easing,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { WebView } from 'react-native-webview';
 import * as Speech from 'expo-speech';
 
-// Paste your entire HTML string inside these backticks
-const htmlContent = String.raw`
-  <!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Hebrew Reading Flashcards</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --ink:#0B1729;
-    --ink-2:#132340;
-    --rule:#22375A;
-    --paper:#F2F5F9;
-    --paper-edge:#D7DFEA;
-    --accent:#2E6BE6;
-    --accent-soft:#8FB4F7;
-    --copper:#C77B3C;
-    --muted:#8298B5;
-    --hebrew:'Frank Ruhl Libre','David Libre','Noto Serif Hebrew','Times New Roman',serif;
-    --ui:'Segoe UI',Helvetica,Calibri,Arial,sans-serif;
-  }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%}
-  body{
-    background:var(--ink);color:var(--paper);font-family:var(--ui);
-    -webkit-font-smoothing:antialiased;
-    display:flex;flex-direction:column;
-    padding:14px 14px calc(14px + env(safe-area-inset-bottom));gap:12px;
-  }
-
-  header{flex:none}
-  .title{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:600}
-  .sub{font-size:12px;color:var(--rule);margin-top:2px}
-  .sub b{color:var(--muted);font-weight:600}
-
-  .decks{display:flex;gap:6px;margin-top:12px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
-  .decks::-webkit-scrollbar{display:none}
-  .deck{
-    flex:none;background:none;border:1px solid var(--rule);color:var(--muted);
-    font-family:var(--ui);font-size:12.5px;font-weight:600;
-    padding:8px 13px;border-radius:999px;cursor:pointer;transition:.18s;white-space:nowrap;
-  }
-  .deck .heb{font-family:var(--hebrew);font-size:15px;direction:rtl;unicode-bidi:isolate}
-  .deck .n{opacity:.6;font-weight:500;margin-inline-start:5px}
-  .deck:hover{border-color:var(--accent-soft);color:var(--paper)}
-  .deck[aria-selected="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
-  .deck:focus-visible{outline:2px solid var(--accent-soft);outline-offset:2px}
-
-  .rail{flex:none;display:flex;align-items:center;gap:10px}
-  .track{flex:1;height:3px;background:var(--rule);border-radius:2px;overflow:hidden;display:flex;justify-content:flex-end}
-  .fill{height:100%;background:var(--accent);transition:width .28s ease}
-  .count{font-size:11.5px;color:var(--muted);font-variant-numeric:tabular-nums;letter-spacing:.05em}
-  .dir{
-    flex:none;background:none;border:1px solid var(--rule);color:var(--muted);
-    font-family:var(--ui);font-size:11px;font-weight:600;letter-spacing:.04em;
-    padding:5px 10px;border-radius:999px;cursor:pointer;transition:.16s;
-  }
-  .dir:hover{border-color:var(--accent-soft);color:var(--paper)}
-  .dir:focus-visible{outline:2px solid var(--accent-soft);outline-offset:2px}
-  .dir[hidden]{display:none}
-
-  .stage{flex:1;display:flex;align-items:center;justify-content:center;perspective:1400px;min-height:0}
-  .card-wrap{position:relative;width:100%;max-width:460px;height:100%;max-height:420px;min-height:230px}
-  .card{
-    width:100%;height:100%;
-    position:relative;transform-style:preserve-3d;
-    transition:transform .5s cubic-bezier(.4,.15,.2,1);
-    cursor:pointer;border:0;padding:0;background:none;font:inherit;
-  }
-  .card.flipped{transform:rotateY(180deg)}
-  .card:focus-visible{outline:2px solid var(--accent-soft);outline-offset:6px;border-radius:14px}
-  .face{
-    position:absolute;inset:0;backface-visibility:hidden;-webkit-backface-visibility:hidden;
-    background:var(--paper);color:var(--ink);border-radius:14px;
-    border-bottom:3px solid var(--paper-edge);
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    padding:24px 20px;text-align:center;overflow:hidden;
-  }
-  .face.back{transform:rotateY(180deg);background:var(--ink-2);color:var(--paper);
-             border:1px solid var(--rule);border-bottom:3px solid var(--accent)}
-  .tag{position:absolute;top:12px;right:14px;font-size:10px;letter-spacing:.14em;
-       text-transform:uppercase;font-weight:700;color:var(--copper)}
-  .face.front .tag{color:#93A5BA}
-
-  .glyph{font-family:var(--hebrew);direction:rtl;line-height:1.15;color:var(--ink)}
-  .glyph.xl{font-size:clamp(70px,21vw,126px);line-height:1.05}
-  .glyph.lg{font-size:clamp(44px,13vw,78px)}
-  .glyph.md{font-size:clamp(30px,8.5vw,50px);line-height:1.35}
-  .glyph.sm{font-size:clamp(21px,5.6vw,34px);line-height:1.6;max-width:15ch}
-  .glyph.pair{font-size:clamp(52px,16vw,92px);display:flex;gap:.35em}
-  .face.back .glyph{color:#fff}
-  .hint{margin-top:18px;font-size:11.5px;color:#8494A8;letter-spacing:.04em}
-
-  .name{font-family:var(--hebrew);font-size:clamp(24px,6.4vw,34px);font-weight:500;color:#fff}
-  .translit{font-size:clamp(17px,4.6vw,23px);font-weight:600;color:var(--accent-soft);margin-top:6px}
-  .mean{font-size:clamp(15px,4vw,19px);color:var(--paper);margin-top:12px;line-height:1.45;max-width:32ch}
-  .note{font-size:13px;color:var(--muted);margin-top:14px;line-height:1.5;max-width:36ch}
-  .prompt{font-size:clamp(22px,6vw,32px);font-weight:600;color:var(--ink);line-height:1.35;max-width:18ch}
-
-  .controls{flex:none;display:flex;flex-direction:column;gap:8px}
-  .row{display:flex;gap:8px}
-  button.act{
-    flex:1;font-family:var(--ui);font-size:13.5px;font-weight:600;
-    padding:13px 10px;border-radius:10px;cursor:pointer;transition:.16s;
-    border:1px solid var(--rule);background:var(--ink-2);color:var(--paper);
-  }
-  button.act:hover{border-color:var(--accent-soft)}
-  button.act:focus-visible{outline:2px solid var(--accent-soft);outline-offset:2px}
-  button.act:disabled{opacity:.35;cursor:default}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  button.ghost{background:none;color:var(--muted);flex:none;padding:13px 16px}
-  .keys{font-size:11px;color:var(--rule);text-align:center;letter-spacing:.04em}
-  .done{font-size:12.5px;color:var(--copper);text-align:center;min-height:16px}
-
-  @media (max-height:640px){ .card-wrap{max-height:290px} .keys{display:none} }
-  @media (prefers-reduced-motion:reduce){ .card,.fill{transition:none} }
-
-  .speak{
-    position:absolute;top:10px;left:12px;z-index:2;
-    width:34px;height:34px;border-radius:50%;
-    display:flex;align-items:center;justify-content:center;
-    background:var(--ink-2);border:1px solid var(--rule);color:var(--accent-soft);
-    font-size:16px;cursor:pointer;transition:.16s;padding:0;
-  }
-  .speak:hover{border-color:var(--accent-soft);color:var(--paper)}
-  .speak:focus-visible{outline:2px solid var(--accent-soft);outline-offset:2px}
-  .speak.playing{color:var(--accent);border-color:var(--accent)}
-  .speak[hidden]{display:none}
-</style>
-</head>
-<body>
-
-<header>
-  <div class="title">Hebrew Reading Flashcards</div>
-  <div class="sub">The New Reading Hebrew &middot; <b id="total">vocabulary</b></div>
-  <div class="decks" role="tablist" id="decks"></div>
-</header>
-
-<div class="rail">
-  <button class="dir" id="dir" type="button">עב &rarr; EN</button>
-  <div class="track"><div class="fill" id="fill" style="width:0%"></div></div>
-  <div class="count" id="count">0 / 0</div>
-</div>
-
-<div class="stage">
-  <div class="card-wrap">
-    <button class="speak" id="speak" type="button" aria-label="Play pronunciation">&#128266;</button>
-    <button class="card" id="card" aria-label="Flashcard. Press to reveal the answer.">
-      <div class="face front"><span class="tag" id="tagF"></span><div id="front"></div><div class="hint">Tap to reveal</div></div>
-      <div class="face back"><span class="tag">Answer</span><div id="back"></div></div>
-    </button>
-  </div>
-</div>
-
-<div class="controls">
-  <div class="done" id="done"></div>
-  <div class="row">
-    <button class="act" id="again">Review again</button>
-    <button class="act primary" id="knew">Knew it</button>
-  </div>
-  <div class="row">
-    <button class="act ghost" id="prev">&larr;</button>
-    <button class="act" id="flip">Flip card</button>
-    <button class="act ghost" id="shuffle">Shuffle</button>
-    <button class="act ghost" id="next">&rarr;</button>
-  </div>
-  <div class="keys">Space flips &middot; Arrows move &middot; P plays audio &middot; 1 review, 2 knew it</div>
-</div>
-
-<script>
 /* =======================================================================
    VOCABULARY — transcribed from the workbook pages.
    Format: ['Hebrew', 'transliteration', 'meaning']
@@ -580,7 +417,7 @@ const REF_DECKS = {
 
 /* ---------------- build decks ---------------- */
 function sizeFor(s){
-  const n = s.replace(/[\u0591-\u05C7]/g,'').length;
+  const n = s.replace(/[֑-ׇ]/g,'').length;
   if(n <= 4)  return 'xl';
   if(n <= 9)  return 'lg';
   if(n <= 20) return 'md';
@@ -598,233 +435,483 @@ Object.entries(VOCAB).forEach(([key,d])=>{
 DECKS.all = {label:'All Words', tag:'Vocabulary', vocab:true, cards:ALL};
 Object.assign(DECKS, REF_DECKS);
 
-/* ============================ APP ============================ */
-const el = id => document.getElementById(id);
-let deckKey = Object.keys(DECKS)[0], queue = [], idx = 0, flipped = false, reviewCount = 0, reverse = false;
+const TOTAL_LABEL = ALL.length + ' words + ' + PHRASE_DECKS.reduce((n,k)=>n+VOCAB[k].words.length,0) + ' prayers & verses';
 
-document.getElementById('total').textContent = ALL.length + ' words + ' + PHRASE_DECKS.reduce((n,k)=>n+VOCAB[k].words.length,0) + ' prayers & verses';
-
-function heb(s){ return '<span class="heb">'+s+'</span>'; }
-
-function buildTabs(){
-  const box = el('decks'); box.innerHTML = '';
-  Object.entries(DECKS).forEach(([key,d])=>{
-    const b = document.createElement('button');
-    b.className='deck'; b.type='button'; b.setAttribute('role','tab');
-    const isHeb = /[\u05D0-\u05EA]/.test(d.label) && d.label.length < 14;
-    b.innerHTML = (isHeb ? heb(d.label) : d.label) + '<span class="n">'+d.cards.length+'</span>';
-    b.setAttribute('aria-selected', key===deckKey);
-    b.onclick = ()=>{ deckKey=key; load(); box.scrollLeft = b.offsetLeft - 40; };
-    box.appendChild(b);
-  });
-}
-
-function load(){
-  queue = DECKS[deckKey].cards.slice();
-  idx = 0; flipped = false; reviewCount = 0; el('done').textContent='';
-  buildTabs(); render();
-}
-
-function shuffle(){
-  for(let i=queue.length-1;i>0;i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [queue[i],queue[j]] = [queue[j],queue[i]];
-  }
-  idx=0; flipped=false; render();
-  el('done').textContent = 'Shuffled.';
-}
-
-function render(){
-  const c = queue[idx], deck = DECKS[deckKey];
-  if(!c) return;
-
-  el('card').classList.toggle('flipped', flipped);
-  el('card').setAttribute('aria-label', flipped ? 'Answer showing. Press to hide.' : 'Flashcard. Press to reveal the answer.');
-  el('tagF').textContent = deck.tag;
-
-  const rev = reverse && deck.vocab;
-  el('dir').hidden = !deck.vocab;
-  el('dir').textContent = rev ? 'EN → עב' : 'עב → EN';
-
-  if(rev){
-    el('front').innerHTML = '<div class="prompt">'+c.mean+'</div>';
-    el('back').innerHTML  = '<div class="glyph '+c.size+'">'+c.front+'</div>'+
-                            '<div class="translit">'+c.translit+'</div>';
-  } else {
-    el('front').innerHTML = '<div class="glyph '+(c.size||'xl')+'">'+
-      (c.size==='pair' ? c.front.split(' ').map(g=>'<span>'+g+'</span>').join('') : c.front)+'</div>';
-    let back = '';
-    if(c.name)     back += '<div class="name">'+c.name+'</div>';
-    if(c.translit) back += '<div class="translit">'+c.translit+'</div>';
-    if(c.mean)     back += '<div class="mean">'+c.mean+'</div>';
-    if(c.note)     back += '<div class="note">'+c.note+'</div>';
-    el('back').innerHTML = back;
-  }
-
-  el('count').textContent = (idx+1)+' / '+queue.length;
-  el('fill').style.width = ((idx+1)/queue.length*100)+'%';
-  el('prev').disabled = idx===0;
-
-  el('speak').hidden = !c.front || !/[א-ת]/.test(c.front);
-}
-
-function speak(text){
-  if(!text) return;
-  const btn = el('speak');
-  if(window.ReactNativeWebView){
-    btn.classList.add('playing');
-    window.ReactNativeWebView.postMessage(JSON.stringify({type:'speak', text}));
-    return;
-  }
-  if(window.speechSynthesis){
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-    const heVoice = voices.find(v=>v.lang && v.lang.toLowerCase().startsWith('he'));
-    u.voice = heVoice || null;
-    u.lang = heVoice ? heVoice.lang : 'he-IL';
-    u.rate = 0.85;
-    u.onstart = ()=> btn.classList.add('playing');
-    u.onend = ()=> btn.classList.remove('playing');
-    u.onerror = ()=> btn.classList.remove('playing');
-    window.speechSynthesis.speak(u);
-    return;
-  }
-  el('done').textContent = 'Speech not supported on this device.';
-}
-
-function onRNMessage(e){
-  let msg;
-  try { msg = JSON.parse(e.data); } catch { return; }
-  if(msg.type === 'speak-done'){ el('speak').classList.remove('playing'); }
-}
-document.addEventListener('message', onRNMessage);
-window.addEventListener('message', onRNMessage);
-
-if(window.speechSynthesis){
-  window.speechSynthesis.getVoices();
-  window.speechSynthesis.onvoiceschanged = ()=> window.speechSynthesis.getVoices();
-}
-
-function step(n){
-  const t = idx+n;
-  if(t<0 || t>=queue.length){
-    if(t>=queue.length) el('done').textContent = reviewCount
-      ? 'End of deck — '+reviewCount+' card'+(reviewCount>1?'s':'')+' re-queued for review.'
-      : 'End of deck. Shuffle to run it again.';
-    return;
-  }
-  idx = t; flipped = false; el('done').textContent=''; render();
-}
-
-function mark(knew){
-  if(!knew){ queue.push(queue[idx]); reviewCount++; }
-  if(idx === queue.length-1){
-    el('done').textContent = 'End of deck. Shuffle to run it again.';
-    flipped = false; render(); return;
-  }
-  step(1);
-}
-
-el('card').onclick    = ()=>{ flipped=!flipped; render(); };
-el('flip').onclick    = ()=>{ flipped=!flipped; render(); };
-el('next').onclick    = ()=> step(1);
-el('prev').onclick    = ()=> step(-1);
-el('shuffle').onclick = shuffle;
-el('knew').onclick    = ()=> mark(true);
-el('again').onclick   = ()=> mark(false);
-el('dir').onclick     = ()=>{ reverse=!reverse; flipped=false; render(); };
 function speakTextFor(c){
   if(!c) return '';
   if(c.name && /[א-ת]/.test(c.name)) return c.name;
   return c.front;
 }
 
-el('speak').onclick   = e=>{ e.stopPropagation(); speak(speakTextFor(queue[idx])); };
+function isHebrewText(s){
+  return !!s && /[א-ת]/.test(s);
+}
 
-document.addEventListener('keydown', e=>{
-  if(e.key===' '||e.key==='Enter'){ e.preventDefault(); flipped=!flipped; render(); }
-  else if(e.key==='ArrowRight') step(1);
-  else if(e.key==='ArrowLeft')  step(-1);
-  else if(e.key==='1') mark(false);
-  else if(e.key==='2') mark(true);
-  else if(e.key.toLowerCase()==='p') speak(speakTextFor(queue[idx]));
-});
+/* ============================ THEME ============================ */
+const COLORS = {
+  ink: '#0B1729',
+  ink2: '#132340',
+  rule: '#22375A',
+  paper: '#F2F5F9',
+  paperEdge: '#D7DFEA',
+  accent: '#2E6BE6',
+  accentSoft: '#8FB4F7',
+  copper: '#C77B3C',
+  muted: '#8298B5',
+};
 
-load();
-</script>
-</body>
-</html>
-`;
+const HEB_FONT = Platform.select({ ios: 'Times New Roman', android: 'serif', default: 'serif' });
+
+// Mirrors the original CSS clamp(min, vw%, max) rules so glyphs scale with
+// screen width the same way the WebView version did.
+function clampSize(min, vwPercent, max, width){
+  return Math.min(max, Math.max(min, (width * vwPercent) / 100));
+}
+
+const GLYPH_CLAMPS = {
+  xl:   [70, 21,  126],
+  lg:   [44, 13,  78],
+  md:   [30, 8.5, 50],
+  sm:   [21, 5.6, 34],
+  pair: [52, 16,  92],
+};
+
+/* ============================ APP ============================ */
+// Fixed fallback matched on both the static server render and the first
+// client render, so hydration never disagrees; the real size is applied
+// via effect immediately after mount (client-only, avoids React error #418).
+const FALLBACK_DIMS = { width: 390, height: 844 };
 
 export default function App() {
-    const webviewRef = useRef(null);
-    const [hebrewVoice, setHebrewVoice] = useState(null);
+  const deckKeys = useMemo(() => Object.keys(DECKS), []);
+  const [{ width, height }, setDims] = useState(FALLBACK_DIMS);
 
-    useEffect(() => {
-        Speech.getAvailableVoicesAsync().then((voices) => {
-            const heb = voices.filter((v) => v.language && v.language.toLowerCase().startsWith('he'));
-            const best =
-                heb.find((v) => v.identifier.includes('hed-network')) ||
-                heb.find((v) => v.identifier.includes('hed-local')) ||
-                heb.find((v) => v.identifier.includes('hed')) ||
-                heb[0];
-            setHebrewVoice(best?.identifier || null);
-        });
-    }, []);
+  useEffect(() => {
+    setDims(Dimensions.get('window'));
+    const sub = Dimensions.addEventListener('change', ({ window }) => setDims(window));
+    return () => sub.remove();
+  }, []);
 
-    const notifyDone = () => {
-        webviewRef.current?.postMessage(JSON.stringify({ type: 'speak-done' }));
-    };
+  const [deckKey, setDeckKey] = useState(deckKeys[0]);
+  const [queue, setQueue] = useState(() => DECKS[deckKeys[0]].cards.slice());
+  const [idx, setIdx] = useState(0);
+  const [flipped, setFlipped] = useState(false);
+  const [reviewCount, setReviewCount] = useState(0);
+  const [reverse, setReverse] = useState(false);
+  const [done, setDone] = useState('');
+  const [speaking, setSpeaking] = useState(false);
+  const [hebrewVoice, setHebrewVoice] = useState(null);
 
-    const handleMessage = (event) => {
-        let msg;
-        try {
-            msg = JSON.parse(event.nativeEvent.data);
-        } catch {
-            return;
+  const flipAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Speech.getAvailableVoicesAsync()
+      .then((voices) => {
+        const heb = voices.filter((v) => v.language && v.language.toLowerCase().startsWith('he'));
+        const best =
+          heb.find((v) => v.identifier.includes('hed-network')) ||
+          heb.find((v) => v.identifier.includes('hed-local')) ||
+          heb.find((v) => v.identifier.includes('hed')) ||
+          heb[0];
+        setHebrewVoice(best?.identifier || null);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    Animated.timing(flipAnim, {
+      toValue: flipped ? 1 : 0,
+      duration: 500,
+      easing: Easing.bezier(0.4, 0.15, 0.2, 1),
+      useNativeDriver: true,
+    }).start();
+  }, [flipped, flipAnim]);
+
+  const deck = DECKS[deckKey];
+  const card = queue[idx];
+  const rev = reverse && deck.vocab;
+
+  function speak(text) {
+    if (!text) return;
+    Speech.stop();
+    setSpeaking(true);
+    Speech.speak(text, {
+      language: 'he-IL',
+      voice: hebrewVoice || undefined,
+      rate: 0.85,
+      onDone: () => setSpeaking(false),
+      onStopped: () => setSpeaking(false),
+      onError: () => setSpeaking(false),
+    });
+  }
+
+  // Keyboard shortcuts only make sense on web (desktop browser).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    function onKeyDown(e) {
+      if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setFlipped((f) => !f); }
+      else if (e.key === 'ArrowRight') step(1);
+      else if (e.key === 'ArrowLeft') step(-1);
+      else if (e.key === '1') mark(false);
+      else if (e.key === '2') mark(true);
+      else if (e.key.toLowerCase() === 'p') speak(speakTextFor(queue[idx]));
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queue, idx, hebrewVoice]);
+
+  function loadDeck(key) {
+    setDeckKey(key);
+    setQueue(DECKS[key].cards.slice());
+    setIdx(0);
+    setFlipped(false);
+    setReviewCount(0);
+    setDone('');
+  }
+
+  function shuffle() {
+    const next = queue.slice();
+    for (let i = next.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [next[i], next[j]] = [next[j], next[i]];
+    }
+    setQueue(next);
+    setIdx(0);
+    setFlipped(false);
+    setDone('Shuffled.');
+  }
+
+  function step(n) {
+    setIdx((prevIdx) => {
+      const t = prevIdx + n;
+      if (t < 0 || t >= queue.length) {
+        if (t >= queue.length) {
+          setDone(
+            reviewCount
+              ? `End of deck — ${reviewCount} card${reviewCount > 1 ? 's' : ''} re-queued for review.`
+              : 'End of deck. Shuffle to run it again.'
+          );
         }
-        if (msg.type === 'speak' && msg.text) {
-            Speech.stop();
-            Speech.speak(msg.text, {
-                language: 'he-IL',
-                voice: hebrewVoice || undefined,
-                rate: 0.85,
-                onDone: notifyDone,
-                onStopped: notifyDone,
-                onError: notifyDone,
-            });
-        }
-    };
+        return prevIdx;
+      }
+      setFlipped(false);
+      setDone('');
+      return t;
+    });
+  }
 
-    return (
-        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-            <StatusBar barStyle="light-content" backgroundColor="#0B1729" />
+  function mark(knew) {
+    if (!knew) {
+      setQueue((q) => [...q, q[idx]]);
+      setReviewCount((c) => c + 1);
+    }
+    if (idx === queue.length - 1) {
+      setDone('End of deck. Shuffle to run it again.');
+      setFlipped(false);
+      return;
+    }
+    step(1);
+  }
 
-            <WebView
-                ref={webviewRef}
-                originWhitelist={['*']}
-                source={{ html: htmlContent }}
-                style={styles.webview}
-                bounces={false}
-                showsHorizontalScrollIndicator={false}
-                showsVerticalScrollIndicator={false}
-                // These props help ensure the webview scales correctly on mobile
-                scalesPageToFit={false}
-                javaScriptEnabled={true}
-                onMessage={handleMessage}
-            />
-        </SafeAreaView>
-    );
+  if (!card) return null;
+
+  const cardWrapMaxHeight = height < 640 ? 290 : 420;
+  const showKeys = height >= 640;
+
+  const frontRotate = flipAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] });
+  const backRotate = flipAnim.interpolate({ inputRange: [0, 1], outputRange: ['180deg', '360deg'] });
+
+  const glyphFontSize = (() => {
+    const key = card.size || 'xl';
+    const [min, vw, max] = GLYPH_CLAMPS[key] || GLYPH_CLAMPS.xl;
+    return clampSize(min, vw, max, width);
+  })();
+  const nameFontSize = clampSize(24, 6.4, 34, width);
+  const translitFontSize = clampSize(17, 4.6, 23, width);
+  const meanFontSize = clampSize(15, 4, 19, width);
+  const promptFontSize = clampSize(22, 6, 32, width);
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.ink} />
+
+      <View style={styles.header}>
+        <Text style={styles.title}>HEBREW READING FLASHCARDS</Text>
+        <Text style={styles.sub}>
+          The New Reading Hebrew · <Text style={styles.subBold}>{TOTAL_LABEL}</Text>
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.decksRow}
+        >
+          {deckKeys.map((key) => {
+            const d = DECKS[key];
+            const selected = key === deckKey;
+            const isHeb = /[א-ת]/.test(d.label) && d.label.length < 14;
+            return (
+              <TouchableOpacity
+                key={key}
+                onPress={() => loadDeck(key)}
+                style={[styles.deckPill, selected && styles.deckPillSelected]}
+              >
+                <Text
+                  style={[
+                    styles.deckLabel,
+                    isHeb && styles.deckLabelHeb,
+                    selected && styles.deckLabelSelected,
+                  ]}
+                >
+                  {d.label}
+                </Text>
+                <Text style={[styles.deckCount, selected && styles.deckCountSelected]}>
+                  {' '}{d.cards.length}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      <View style={styles.rail}>
+        {deck.vocab ? (
+          <TouchableOpacity
+            style={styles.dirBtn}
+            onPress={() => {
+              setReverse((r) => !r);
+              setFlipped(false);
+            }}
+          >
+            <Text style={styles.dirText}>{rev ? 'EN → עב' : 'עב → EN'}</Text>
+          </TouchableOpacity>
+        ) : null}
+        <View style={styles.track}>
+          <View style={[styles.fill, { width: `${((idx + 1) / queue.length) * 100}%` }]} />
+        </View>
+        <Text style={styles.count}>{idx + 1} / {queue.length}</Text>
+      </View>
+
+      <View style={styles.stage}>
+        <View style={[styles.cardWrap, { maxHeight: cardWrapMaxHeight }]}>
+          {isHebrewText(card.front) ? (
+            <TouchableOpacity
+              style={[styles.speakBtn, speaking && styles.speakBtnActive]}
+              onPress={() => speak(speakTextFor(card))}
+            >
+              <Text style={styles.speakIcon}>🔊</Text>
+            </TouchableOpacity>
+          ) : null}
+
+          <Pressable style={styles.cardTouchable} onPress={() => setFlipped((f) => !f)}>
+            <Animated.View
+              style={[
+                styles.face,
+                styles.faceFront,
+                { transform: [{ perspective: 1400 }, { rotateY: frontRotate }] },
+              ]}
+            >
+              <Text style={styles.tagFront}>{deck.tag}</Text>
+              {rev ? (
+                <Text style={[styles.prompt, { fontSize: promptFontSize }]}>{card.mean}</Text>
+              ) : card.size === 'pair' ? (
+                <View style={styles.pairRow}>
+                  {card.front.split(' ').map((g, i) => (
+                    <Text key={i} style={[styles.glyph, { fontSize: glyphFontSize }]}>{g}</Text>
+                  ))}
+                </View>
+              ) : (
+                <Text style={[styles.glyph, { fontSize: glyphFontSize }]}>{card.front}</Text>
+              )}
+              <Text style={styles.hint}>Tap to reveal</Text>
+            </Animated.View>
+
+            <Animated.View
+              style={[
+                styles.face,
+                styles.faceBack,
+                { transform: [{ perspective: 1400 }, { rotateY: backRotate }] },
+              ]}
+            >
+              <Text style={styles.tagBack}>Answer</Text>
+              {rev ? (
+                <>
+                  <Text style={[styles.glyph, styles.glyphBack, { fontSize: glyphFontSize }]}>
+                    {card.front}
+                  </Text>
+                  <Text style={[styles.translit, { fontSize: translitFontSize }]}>{card.translit}</Text>
+                </>
+              ) : (
+                <>
+                  {card.name ? (
+                    <Text style={[styles.name, { fontSize: nameFontSize }]}>{card.name}</Text>
+                  ) : null}
+                  {card.translit ? (
+                    <Text style={[styles.translit, { fontSize: translitFontSize }]}>{card.translit}</Text>
+                  ) : null}
+                  {card.mean ? (
+                    <Text style={[styles.mean, { fontSize: meanFontSize }]}>{card.mean}</Text>
+                  ) : null}
+                  {card.note ? <Text style={styles.note}>{card.note}</Text> : null}
+                </>
+              )}
+            </Animated.View>
+          </Pressable>
+        </View>
+      </View>
+
+      <View style={styles.controls}>
+        <Text style={styles.done}>{done}</Text>
+        <View style={styles.row}>
+          <TouchableOpacity style={styles.actBtn} onPress={() => mark(false)}>
+            <Text style={styles.actText}>Review again</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actBtn, styles.actPrimary]} onPress={() => mark(true)}>
+            <Text style={[styles.actText, styles.actTextPrimary]}>Knew it</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.row}>
+          <TouchableOpacity
+            style={[styles.actBtn, styles.actGhost]}
+            disabled={idx === 0}
+            onPress={() => step(-1)}
+          >
+            <Text style={[styles.actText, styles.actTextGhost, idx === 0 && styles.actTextDisabled]}>←</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actBtn} onPress={() => setFlipped((f) => !f)}>
+            <Text style={styles.actText}>Flip card</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actBtn, styles.actGhost]} onPress={shuffle}>
+            <Text style={[styles.actText, styles.actTextGhost]}>Shuffle</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.actBtn, styles.actGhost]} onPress={() => step(1)}>
+            <Text style={[styles.actText, styles.actTextGhost]}>→</Text>
+          </TouchableOpacity>
+        </View>
+        {showKeys ? (
+          <Text style={styles.keys}>
+            {Platform.OS === 'web'
+              ? 'Space flips · Arrows move · P plays audio · 1 review, 2 knew it'
+              : 'Tap card to flip · Tap 🔊 to hear pronunciation'}
+          </Text>
+        ) : null}
+      </View>
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#0B1729',
-    },
-    webview: {
-        flex: 1,
-        backgroundColor: 'transparent',
-    },
+  container: { flex: 1, backgroundColor: COLORS.ink, padding: 14, gap: 12 },
+  header: {},
+  title: { fontSize: 13, letterSpacing: 2, color: COLORS.muted, fontWeight: '600' },
+  sub: { fontSize: 12, color: COLORS.rule, marginTop: 2 },
+  subBold: { color: COLORS.muted, fontWeight: '600' },
+  decksRow: { gap: 6, marginTop: 12, paddingBottom: 2 },
+  deckPill: {
+    borderWidth: 1,
+    borderColor: COLORS.rule,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deckPillSelected: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  deckLabel: { fontSize: 12.5, fontWeight: '600', color: COLORS.muted },
+  deckLabelHeb: { fontFamily: HEB_FONT, fontSize: 15, writingDirection: 'rtl' },
+  deckLabelSelected: { color: '#fff' },
+  deckCount: { fontSize: 11, fontWeight: '500', color: COLORS.muted, opacity: 0.6 },
+  deckCountSelected: { color: '#fff', opacity: 0.8 },
+
+  rail: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dirBtn: {
+    borderWidth: 1,
+    borderColor: COLORS.rule,
+    borderRadius: 999,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+  },
+  dirText: { fontSize: 11, fontWeight: '600', color: COLORS.muted, letterSpacing: 0.5 },
+  track: { flex: 1, height: 3, backgroundColor: COLORS.rule, borderRadius: 2, overflow: 'hidden' },
+  fill: { height: '100%', backgroundColor: COLORS.accent },
+  count: { fontSize: 11.5, color: COLORS.muted, letterSpacing: 0.5 },
+
+  stage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  cardWrap: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 460,
+    height: '100%',
+    minHeight: 230,
+  },
+  cardTouchable: { flex: 1 },
+  face: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backfaceVisibility: 'hidden',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  faceFront: { backgroundColor: COLORS.paper, borderBottomWidth: 3, borderBottomColor: COLORS.paperEdge },
+  faceBack: {
+    backgroundColor: COLORS.ink2,
+    borderWidth: 1,
+    borderColor: COLORS.rule,
+    borderBottomWidth: 3,
+    borderBottomColor: COLORS.accent,
+  },
+  tagFront: { position: 'absolute', top: 12, right: 14, fontSize: 10, letterSpacing: 1.4, fontWeight: '700', color: '#93A5BA' },
+  tagBack: { position: 'absolute', top: 12, right: 14, fontSize: 10, letterSpacing: 1.4, fontWeight: '700', color: COLORS.copper },
+  glyph: { fontFamily: HEB_FONT, color: COLORS.ink, textAlign: 'center', writingDirection: 'rtl' },
+  glyphBack: { color: '#fff' },
+  pairRow: { flexDirection: 'row', gap: 14 },
+  hint: { marginTop: 18, fontSize: 11.5, color: '#8494A8', letterSpacing: 0.5 },
+  name: { fontFamily: HEB_FONT, fontWeight: '500', color: '#fff', writingDirection: 'rtl' },
+  translit: { fontWeight: '600', color: COLORS.accentSoft, marginTop: 6, textAlign: 'center' },
+  mean: { color: COLORS.paper, marginTop: 12, lineHeight: 24, textAlign: 'center', maxWidth: '90%' },
+  note: { fontSize: 13, color: COLORS.muted, marginTop: 14, lineHeight: 19, textAlign: 'center', maxWidth: '90%' },
+  prompt: { fontWeight: '600', color: COLORS.ink, lineHeight: 34, textAlign: 'center' },
+
+  speakBtn: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    zIndex: 2,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: COLORS.ink2,
+    borderWidth: 1,
+    borderColor: COLORS.rule,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speakBtnActive: { borderColor: COLORS.accent },
+  speakIcon: { fontSize: 16 },
+
+  controls: { gap: 8 },
+  row: { flexDirection: 'row', gap: 8 },
+  actBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.rule,
+    backgroundColor: COLORS.ink2,
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+  },
+  actPrimary: { backgroundColor: COLORS.accent, borderColor: COLORS.accent },
+  actGhost: { flex: 0, backgroundColor: 'transparent', paddingHorizontal: 16 },
+  actText: { fontSize: 13.5, fontWeight: '600', color: COLORS.paper },
+  actTextPrimary: { color: '#fff' },
+  actTextGhost: { color: COLORS.muted },
+  actTextDisabled: { opacity: 0.35 },
+  done: { fontSize: 12.5, color: COLORS.copper, textAlign: 'center', minHeight: 16 },
+  keys: { fontSize: 11, color: COLORS.rule, textAlign: 'center', letterSpacing: 0.5 },
 });

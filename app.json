@@ -26,7 +26,8 @@
     "plugins": [],
     "experiments": {
       "typedRoutes": true,
-      "reactCompiler": true
+      "reactCompiler": true,
+      "baseUrl": "/hebrew-flashcards"
     }
   }
 }
