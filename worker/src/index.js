@@ -18,6 +18,10 @@ const ALLOWED_ORIGINS = new Set([
 
 const VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
 const MODEL_ID = "eleven_multilingual_v2";
+// Bump on any change to how `text` is transformed before synthesis (e.g.
+// the punctuation padding below), so previously-cached audio generated
+// under the old behavior doesn't keep being served forever.
+const CACHE_VERSION = "v2";
 
 function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.has(origin) ? origin : "https://azaurov.github.io";
@@ -48,7 +52,7 @@ export default {
     }
 
     // Cache key ignores Origin — the audio itself is origin-independent.
-    const cacheKey = new Request(`https://cache.internal/tts/${VOICE_ID}/${MODEL_ID}/${encodeURIComponent(text)}`);
+    const cacheKey = new Request(`https://cache.internal/tts/${CACHE_VERSION}/${VOICE_ID}/${MODEL_ID}/${encodeURIComponent(text)}`);
     const cache = caches.default;
 
     let cached = await cache.match(cacheKey);
@@ -58,6 +62,12 @@ export default {
       headers.set("X-Cache", "HIT");
       return new Response(cached.body, { headers, status: 200 });
     }
+
+    // ElevenLabs tends to clip or rush very short, isolated inputs (a
+    // single letter name like "אָלֶף" with nothing after it). Padding with
+    // trailing punctuation gives the model a natural place to land instead
+    // of cutting off mid-word.
+    const ttsText = /[.!?׃…]$/.test(text) ? text : `${text}.`;
 
     const upstream = await fetch(
       `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
@@ -69,7 +79,7 @@ export default {
           Accept: "audio/mpeg",
         },
         body: JSON.stringify({
-          text,
+          text: ttsText,
           model_id: MODEL_ID,
           voice_settings: { stability: 0.5, similarity_boost: 0.75 },
         }),

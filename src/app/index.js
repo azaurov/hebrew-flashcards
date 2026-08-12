@@ -437,9 +437,14 @@ Object.assign(DECKS, REF_DECKS);
 
 const TOTAL_LABEL = ALL.length + ' words + ' + PHRASE_DECKS.reduce((n,k)=>n+VOCAB[k].words.length,0) + ' prayers & verses';
 
-function speakTextFor(c){
+function speakTextFor(c, deck){
   if(!c) return '';
-  if(c.name && /[א-ת]/.test(c.name)) return c.name;
+  // Only the Alef-Bet deck needs the letter's name spoken instead of its
+  // glyph — a bare consonant (e.g. ר alone) has no vowel to cue correct
+  // pronunciation. Vowels/Nikkud cards are a letter+vowel-point combo
+  // (e.g. אַ) that already sounds right read as-is; speaking the nikud's
+  // *name* there would say "Patach" instead of the "ah" sound it wants.
+  if(deck && deck.tag === 'Letter' && c.name && /[א-ת]/.test(c.name)) return c.name;
   return c.front;
 }
 
@@ -605,12 +610,12 @@ export default function App() {
       else if (e.key === 'ArrowLeft') step(-1);
       else if (e.key === '1') mark(false);
       else if (e.key === '2') mark(true);
-      else if (e.key.toLowerCase() === 'p') speak(speakTextFor(queue[idx]));
+      else if (e.key.toLowerCase() === 'p') speak(speakTextFor(queue[idx], deck));
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queue, idx, hebrewVoice]);
+  }, [queue, idx, hebrewVoice, deck]);
 
   function loadDeck(key) {
     setDeckKey(key);
@@ -748,7 +753,7 @@ export default function App() {
           {isHebrewText(card.front) ? (
             <TouchableOpacity
               style={[styles.speakBtn, speaking && styles.speakBtnActive]}
-              onPress={() => speak(speakTextFor(card))}
+              onPress={() => speak(speakTextFor(card, deck))}
             >
               <Text style={styles.speakIcon}>🔊</Text>
             </TouchableOpacity>
