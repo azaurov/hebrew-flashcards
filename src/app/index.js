@@ -533,6 +533,31 @@ export default function App() {
 
   function speak(text) {
     if (!text) return;
+
+    // expo-speech's web shim resolves `voice` by matching voiceURI, but
+    // silently falls back to voices[0] (Math.max(0, -1)) when the match
+    // fails instead of leaving the default voice alone — which is exactly
+    // how a bad voice slips back in after a page reload. Bypass it on web
+    // and set the SpeechSynthesisVoice object directly, so a failed match
+    // just means "no explicit voice" instead of "wrong voice picked".
+    if (Platform.OS === 'web') {
+      if (!window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      const utterance = new window.SpeechSynthesisUtterance(text);
+      const voices = window.speechSynthesis.getVoices();
+      const match = hebrewVoice ? voices.find((v) => v.voiceURI === hebrewVoice) : null;
+      utterance.voice = match || null;
+      utterance.lang = match ? match.lang : 'he-IL';
+      utterance.rate = 0.85;
+      const hebCount = voices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('he')).length;
+      setDone(`voice: ${match ? match.name : 'default'} (${hebCount} he voices, wanted ${hebrewVoice || 'none'})`);
+      setSpeaking(true);
+      utterance.onend = () => setSpeaking(false);
+      utterance.onerror = () => setSpeaking(false);
+      window.speechSynthesis.speak(utterance);
+      return;
+    }
+
     Speech.stop();
     setSpeaking(true);
     Speech.speak(text, {
