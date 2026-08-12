@@ -467,9 +467,16 @@ const COLORS = {
 
 const HEB_FONT = Platform.select({ ios: 'Times New Roman', android: 'serif', default: 'serif' });
 
-// Cloudflare Worker proxying ElevenLabs TTS (web only) — see worker/src/index.js.
+// Cloudflare Worker proxying Google Cloud TTS (web only) — see worker/src/index.js.
 // Native platforms keep using the device's TextToSpeech engine via expo-speech.
 const TTS_PROXY_URL = 'https://hebrew-flashcards-tts.azaurov.workers.dev';
+// The Worker's response has a 1-year immutable Cache-Control, which caches
+// per exact URL in the *browser's own* HTTP cache — separate from and in
+// addition to Cloudflare's edge cache. Swapping TTS providers/voices server-
+// side does nothing for a returning visitor's browser cache, since the
+// request URL never changed. Bump this whenever the backend voice/provider
+// changes so the URL itself changes and old cached audio can't be reused.
+const TTS_CACHE_BUST = 'v3-google';
 
 // Mirrors the original CSS clamp(min, vw%, max) rules so glyphs scale with
 // screen width the same way the WebView version did.
@@ -564,7 +571,7 @@ export default function App() {
     if (Platform.OS === 'web') {
       setSpeaking(true);
       setDone('');
-      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}`)
+      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`)
         .then((res) => {
           if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
           return res.blob();

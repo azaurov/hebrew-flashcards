@@ -107,7 +107,10 @@ export default {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        "Cache-Control": "public, max-age=31536000, immutable",
+        // 30 days, not a full year+immutable: the client also appends a
+        // cache-busting `v` param it bumps on backend changes, but this is
+        // a safety net in case that's ever forgotten.
+        "Cache-Control": "public, max-age=2592000",
       },
     });
     ctx.waitUntil(cache.put(cacheKey, cacheableResponse.clone()));
