@@ -1,13 +1,20 @@
-// Cloudflare Worker: ElevenLabs TTS proxy for Hebrew Reading Flashcards.
+// Cloudflare Worker: Google Cloud Text-to-Speech proxy for Hebrew Reading
+// Flashcards.
 //
-// Keeps ELEVENLABS_API_KEY server-side (set via `wrangler secret put`) so the
+// Keeps GOOGLE_TTS_API_KEY server-side (set via `wrangler secret put`) so the
 // static GitHub Pages site never ships a usable key in its client bundle.
 //
 // GET /?text=<hebrew> — cached at Cloudflare's edge (Cache API) so repeat
-// requests for the same flashcard word across all users cost zero
-// ElevenLabs quota after the first fetch. ElevenLabs' free tier is only
-// 10k chars/month, and this app's vocabulary repeats constantly, so
-// caching matters a lot more here than it would for arbitrary text.
+// requests for the same flashcard word across all users cost zero quota
+// after the first fetch. Google's free tier is generous (~4M chars/month
+// standard, 1M WaveNet), but this app's ~250-word vocabulary repeats
+// constantly across users/sessions, so caching still matters.
+//
+// Switched from ElevenLabs: that account had zero Hebrew-tagged voices in
+// either its own library or the shared community library, so every word
+// was going through a plain American-English voice guessing at Hebrew —
+// widespread mispronunciation was the expected outcome, not a bug to
+// patch around. Google's he-IL voices are trained specifically for Hebrew.
 
 const ALLOWED_ORIGINS = new Set([
   "https://azaurov.github.io",
@@ -16,12 +23,11 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:8793",
 ]);
 
-const VOICE_ID = "EXAVITQu4vr4xnSDxMaL";
-const MODEL_ID = "eleven_multilingual_v2";
-// Bump on any change to how `text` is transformed before synthesis (e.g.
-// the punctuation padding below), so previously-cached audio generated
-// under the old behavior doesn't keep being served forever.
-const CACHE_VERSION = "v2";
+const LANGUAGE_CODE = "he-IL";
+const VOICE_NAME = "he-IL-Wavenet-C";
+// Bump on any change to voice/model/text-transform, so previously-cached
+// audio generated under the old behavior doesn't keep being served forever.
+const CACHE_VERSION = "v3-google";
 
 function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.has(origin) ? origin : "https://azaurov.github.io";
@@ -30,6 +36,13 @@ function corsHeaders(origin) {
     "Access-Control-Allow-Methods": "GET, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
   };
+}
+
+function base64ToBytes(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 export default {
@@ -52,7 +65,7 @@ export default {
     }
 
     // Cache key ignores Origin — the audio itself is origin-independent.
-    const cacheKey = new Request(`https://cache.internal/tts/${CACHE_VERSION}/${VOICE_ID}/${MODEL_ID}/${encodeURIComponent(text)}`);
+    const cacheKey = new Request(`https://cache.internal/tts/${CACHE_VERSION}/${VOICE_NAME}/${encodeURIComponent(text)}`);
     const cache = caches.default;
 
     let cached = await cache.match(cacheKey);
@@ -63,25 +76,15 @@ export default {
       return new Response(cached.body, { headers, status: 200 });
     }
 
-    // ElevenLabs tends to clip or rush very short, isolated inputs (a
-    // single letter name like "אָלֶף" with nothing after it). Padding with
-    // trailing punctuation gives the model a natural place to land instead
-    // of cutting off mid-word.
-    const ttsText = /[.!?׃…]$/.test(text) ? text : `${text}.`;
-
     const upstream = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${env.GOOGLE_TTS_API_KEY}`,
       {
         method: "POST",
-        headers: {
-          "xi-api-key": env.ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: ttsText,
-          model_id: MODEL_ID,
-          voice_settings: { stability: 0.5, similarity_boost: 0.75 },
+          input: { text },
+          voice: { languageCode: LANGUAGE_CODE, name: VOICE_NAME },
+          audioConfig: { audioEncoding: "MP3", speakingRate: 0.9 },
         }),
       }
     );
@@ -94,8 +97,13 @@ export default {
       });
     }
 
-    const audioBuffer = await upstream.arrayBuffer();
-    const cacheableResponse = new Response(audioBuffer, {
+    const { audioContent } = await upstream.json();
+    if (!audioContent) {
+      return new Response("TTS upstream returned no audio", { status: 502, headers: cors });
+    }
+    const audioBytes = base64ToBytes(audioContent);
+
+    const cacheableResponse = new Response(audioBytes, {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
@@ -107,6 +115,6 @@ export default {
     const headers = new Headers(cacheableResponse.headers);
     Object.entries(cors).forEach(([k, v]) => headers.set(k, v));
     headers.set("X-Cache", "MISS");
-    return new Response(audioBuffer, { headers, status: 200 });
+    return new Response(audioBytes, { headers, status: 200 });
   },
 };
