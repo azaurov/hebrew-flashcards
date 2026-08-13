@@ -453,6 +453,43 @@ function isHebrewText(s){
   return !!s && /[א-ת]/.test(s);
 }
 
+const DAGESH = 'ּ';
+// Letters where the U+05BC combining mark is meaningful and must be kept:
+// bet/kaf/pe, where dagesh audibly changes the sound (b/v, k/kh, p/f) in
+// Modern Israeli Hebrew — and vav, where the *same* codepoint doubles as
+// the "shuruk" vowel sign (וּ = "oo"), not a dagesh at all. On every other
+// letter it's a silent grammatical mark (dagesh qal) that TTS engines
+// apparently mistake for a gemination/glottal cue, inserting a spurious
+// extra syllable (e.g. גַּן "gan" coming out "ga-e-an").
+const DAGESH_AUDIBLE_LETTERS = new Set(['ב', 'כ', 'פ', 'ו']); // ב כ פ ו
+
+// Prepares display text for speech only — never used for what's shown
+// on the card, only for what's sent to the TTS proxy.
+function normalizeForSpeech(text){
+  if(!text) return text;
+  let result = text
+    // יְיָ is the traditional written substitute for the divine name —
+    // always read aloud as "Adonai" regardless of how it's spelled. No
+    // TTS engine can infer that liturgical convention on its own.
+    .replace(/יְיָ/g, 'אֲדֹנָי');
+
+  // Match each Hebrew consonant plus its whole trailing run of combining
+  // marks (nikkud, dagesh, shin/sin dot) as one cluster — the source data
+  // isn't consistent about whether dagesh comes immediately after the
+  // letter or after the vowel point, so a simple one-char lookbehind for
+  // dagesh isn't reliable; scanning the whole cluster is.
+  result = result.replace(
+    /([א-ת])([֑-ׇ]*)/gu,
+    (match, letter, marks) => {
+      if (!marks.includes(DAGESH)) return match;
+      if (DAGESH_AUDIBLE_LETTERS.has(letter)) return match;
+      return letter + marks.replace(DAGESH, '');
+    }
+  );
+
+  return result;
+}
+
 /* ============================ THEME ============================ */
 const COLORS = {
   ink: '#0B1729',
@@ -581,6 +618,9 @@ export default function App() {
 
   function speak(text) {
     if (!text) return;
+    // Only affects what's sent to the TTS proxy — the displayed card text
+    // is untouched.
+    const ttsText = normalizeForSpeech(text);
 
     if (Platform.OS === 'web') {
       setSpeaking(true);
@@ -602,7 +642,7 @@ export default function App() {
         // fine, the element is still primed for the src swap below.
       }
 
-      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`)
+      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(ttsText)}&v=${TTS_CACHE_BUST}`)
         .then((res) => {
           if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
           return res.blob();
@@ -652,7 +692,7 @@ export default function App() {
     setSpeaking(true);
     setDone('');
 
-    const uri = `${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`;
+    const uri = `${TTS_PROXY_URL}/?text=${encodeURIComponent(ttsText)}&v=${TTS_CACHE_BUST}`;
     const player = createAudioPlayer(uri);
     audioPlayerRef.current = player;
     let settled = false;
