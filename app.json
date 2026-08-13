@@ -23,7 +23,9 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": [],
+    "plugins": [
+      "expo-audio"
+    ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true,

@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Speech from 'expo-speech';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 
 /* =======================================================================
    VOCABULARY — transcribed from the workbook pages.
@@ -519,6 +520,7 @@ export default function App() {
   const [hebrewVoice, setHebrewVoice] = useState(null);
 
   const flipAnim = useRef(new Animated.Value(0)).current;
+  const audioPlayerRef = useRef(null);
 
   useEffect(() => {
     Speech.getAvailableVoicesAsync()
@@ -532,6 +534,13 @@ export default function App() {
         setHebrewVoice(best?.identifier || null);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    // Without this, audio playback via expo-audio is silenced whenever the
+    // iOS hardware mute switch is on — a common "no sound" surprise.
+    setAudioModeAsync({ playsInSilentMode: true }).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -621,6 +630,65 @@ export default function App() {
       return;
     }
 
+    // Native: prefer the same Google-TTS-backed proxy used on web, since
+    // on-device voices vary wildly in Hebrew pronunciation quality across
+    // manufacturers/OS versions (see the Android "hed" voice hunt, which
+    // doesn't even transfer to iOS — Apple's voice identifiers use a
+    // completely different naming scheme). Fall back to the device voice
+    // only if the proxy is unreachable.
+    if (audioPlayerRef.current) {
+      try {
+        audioPlayerRef.current.remove();
+      } catch {
+        // already released
+      }
+      audioPlayerRef.current = null;
+    }
+    setSpeaking(true);
+    setDone('');
+
+    const uri = `${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`;
+    const player = createAudioPlayer(uri);
+    audioPlayerRef.current = player;
+    let settled = false;
+
+    const cleanUp = () => {
+      if (audioPlayerRef.current === player) audioPlayerRef.current = null;
+      try {
+        player.remove();
+      } catch {
+        // already released
+      }
+    };
+
+    // expo-audio has no dedicated load-error event to react to; if
+    // playback hasn't started within a few seconds (bad network, proxy
+    // down), assume it failed and fall back rather than leaving the user
+    // with silence.
+    const fallbackTimer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      subscription.remove();
+      cleanUp();
+      setDone('Using device voice (audio service unreachable).');
+      speakWithDeviceVoice(text);
+    }, 4000);
+
+    const subscription = player.addListener('playbackStatusUpdate', (status) => {
+      if (settled) return;
+      if (status.didJustFinish) {
+        settled = true;
+        clearTimeout(fallbackTimer);
+        subscription.remove();
+        cleanUp();
+        setSpeaking(false);
+      }
+    });
+
+    player.play();
+  }
+
+  function speakWithDeviceVoice(text) {
     Speech.stop();
     setSpeaking(true);
     Speech.speak(text, {
