@@ -479,21 +479,23 @@ const TTS_PROXY_URL = 'https://hebrew-flashcards-tts.azaurov.workers.dev';
 // changes so the URL itself changes and old cached audio can't be reused.
 const TTS_CACHE_BUST = 'v3-google';
 
-// TEMPORARY: A/B test candidates for picking a correctly-pronouncing
-// Google he-IL voice (Wavenet-C mispronounced final resh the same way
-// the earlier ElevenLabs voice did). Remove this and the debug cycling
-// in speak() once a voice is confirmed and locked in.
-const VOICE_CANDIDATES = [
-  'he-IL-Wavenet-A',
-  'he-IL-Wavenet-B',
-  'he-IL-Wavenet-C',
-  'he-IL-Wavenet-D',
-  'he-IL-Standard-A',
-  'he-IL-Standard-B',
-  'he-IL-Chirp3-HD-Charon',
-  'he-IL-Chirp3-HD-Kore',
-  'he-IL-Chirp3-HD-Puck',
-  'he-IL-Chirp3-HD-Zephyr',
+// TEMPORARY: all 10 Google he-IL voices produced the identical "bal"-ish
+// mispronunciation for the same pointed (niqqud) text, ruling out a
+// voice-selection issue. Testing now whether the *text* is the problem —
+// full vowel pointing is unusual for real-world Hebrew, which is almost
+// always written unpointed, and TTS G2P pipelines may not handle it well.
+// Each candidate is [label, text]; voice stays fixed.
+const DEBUG_VOICE = 'he-IL-Chirp3-HD-Charon';
+const TEXT_CANDIDATES = [
+  ['pointed (current)', 'בַּר'],
+  ['unpointed', 'בר'],
+  // Same characters as "pointed (current)" but with the dagesh combining
+  // mark placed immediately after the base letter, before the vowel point
+  // -- the conventional Hebrew keyboard typing order. Unicode treats this
+  // as canonically equivalent to the current stored order (both normalize
+  // to the same NFC form), but a TTS G2P pipeline that does not apply
+  // canonical reordering before parsing might read the marks differently.
+  ['dagesh-before-vowel order', 'בַּר'],
 ];
 
 // Mirrors the original CSS clamp(min, vw%, max) rules so glyphs scale with
@@ -591,24 +593,27 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }
 
-  // TEMPORARY debug: plays the same word through every VOICE_CANDIDATES
-  // entry back-to-back, labeling each on screen, so we can A/B which
-  // Google he-IL voice actually pronounces resh correctly. Reuses one
-  // <audio> element across the whole sequence (not a fresh one per
+  // TEMPORARY debug: plays TEXT_CANDIDATES back-to-back through the same
+  // fixed voice, labeling each on screen, to isolate whether the resh
+  // mispronunciation is caused by our source text's vowel-pointing/
+  // combining-mark formatting rather than by voice choice (all 10 Google
+  // voices tested identically on the same text, ruling that out). Reuses
+  // one <audio> element across the whole sequence (not a fresh one per
   // candidate) because Safari/iOS only keeps an element "unlocked" for
   // programmatic play() if it was the one played inside the original
   // user gesture — a new Audio() per iteration would get blocked after
-  // the first, gesture-linked one.
-  function playNextCandidate(text, i, audio) {
-    if (i >= VOICE_CANDIDATES.length) {
+  // the first, gesture-linked one. Ignores the `text` argument passed
+  // in — always tests the fixed word this round is about.
+  function playNextCandidate(_ignoredText, i, audio) {
+    if (i >= TEXT_CANDIDATES.length) {
       setSpeaking(false);
       setDone('Done — which number sounded right?');
       return;
     }
-    const voice = VOICE_CANDIDATES[i];
-    setDone(`(${i + 1}/${VOICE_CANDIDATES.length}) ${voice}`);
-    const advance = () => setTimeout(() => playNextCandidate(text, i + 1, audio), 500);
-    fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&voice=${voice}&v=${TTS_CACHE_BUST}`)
+    const [label, candidateText] = TEXT_CANDIDATES[i];
+    setDone(`(${i + 1}/${TEXT_CANDIDATES.length}) ${label}`);
+    const advance = () => setTimeout(() => playNextCandidate(_ignoredText, i + 1, audio), 500);
+    fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(candidateText)}&voice=${DEBUG_VOICE}&v=${TTS_CACHE_BUST}-${i}`)
       .then((res) => {
         if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
         return res.blob();
