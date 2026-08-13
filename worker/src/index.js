@@ -24,7 +24,23 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 const LANGUAGE_CODE = "he-IL";
-const VOICE_NAME = "he-IL-Wavenet-C";
+const DEFAULT_VOICE_NAME = "he-IL-Wavenet-C";
+// Voices allowed via ?voice= for A/B testing pronunciation quality — see
+// `GET /v1/voices?languageCode=he-IL` for the full catalog.
+const ALLOWED_VOICES = new Set([
+  "he-IL-Wavenet-A",
+  "he-IL-Wavenet-B",
+  "he-IL-Wavenet-C",
+  "he-IL-Wavenet-D",
+  "he-IL-Standard-A",
+  "he-IL-Standard-B",
+  "he-IL-Standard-C",
+  "he-IL-Standard-D",
+  "he-IL-Chirp3-HD-Charon",
+  "he-IL-Chirp3-HD-Kore",
+  "he-IL-Chirp3-HD-Puck",
+  "he-IL-Chirp3-HD-Zephyr",
+]);
 // Bump on any change to voice/model/text-transform, so previously-cached
 // audio generated under the old behavior doesn't keep being served forever.
 const CACHE_VERSION = "v3-google";
@@ -64,8 +80,11 @@ export default {
       return new Response("Missing or oversized `text` query param", { status: 400, headers: cors });
     }
 
+    const requestedVoice = url.searchParams.get("voice") || "";
+    const voiceName = ALLOWED_VOICES.has(requestedVoice) ? requestedVoice : DEFAULT_VOICE_NAME;
+
     // Cache key ignores Origin — the audio itself is origin-independent.
-    const cacheKey = new Request(`https://cache.internal/tts/${CACHE_VERSION}/${VOICE_NAME}/${encodeURIComponent(text)}`);
+    const cacheKey = new Request(`https://cache.internal/tts/${CACHE_VERSION}/${voiceName}/${encodeURIComponent(text)}`);
     const cache = caches.default;
 
     let cached = await cache.match(cacheKey);
@@ -83,7 +102,7 @@ export default {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           input: { text },
-          voice: { languageCode: LANGUAGE_CODE, name: VOICE_NAME },
+          voice: { languageCode: LANGUAGE_CODE, name: voiceName },
           audioConfig: { audioEncoding: "MP3", speakingRate: 0.9 },
         }),
       }

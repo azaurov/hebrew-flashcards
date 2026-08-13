@@ -479,6 +479,23 @@ const TTS_PROXY_URL = 'https://hebrew-flashcards-tts.azaurov.workers.dev';
 // changes so the URL itself changes and old cached audio can't be reused.
 const TTS_CACHE_BUST = 'v3-google';
 
+// TEMPORARY: A/B test candidates for picking a correctly-pronouncing
+// Google he-IL voice (Wavenet-C mispronounced final resh the same way
+// the earlier ElevenLabs voice did). Remove this and the debug cycling
+// in speak() once a voice is confirmed and locked in.
+const VOICE_CANDIDATES = [
+  'he-IL-Wavenet-A',
+  'he-IL-Wavenet-B',
+  'he-IL-Wavenet-C',
+  'he-IL-Wavenet-D',
+  'he-IL-Standard-A',
+  'he-IL-Standard-B',
+  'he-IL-Chirp3-HD-Charon',
+  'he-IL-Chirp3-HD-Kore',
+  'he-IL-Chirp3-HD-Puck',
+  'he-IL-Chirp3-HD-Zephyr',
+];
+
 // Mirrors the original CSS clamp(min, vw%, max) rules so glyphs scale with
 // screen width the same way the WebView version did.
 function clampSize(min, vwPercent, max, width){
@@ -574,6 +591,45 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }
 
+  // TEMPORARY debug: plays the same word through every VOICE_CANDIDATES
+  // entry back-to-back, labeling each on screen, so we can A/B which
+  // Google he-IL voice actually pronounces resh correctly. Reuses one
+  // <audio> element across the whole sequence (not a fresh one per
+  // candidate) because Safari/iOS only keeps an element "unlocked" for
+  // programmatic play() if it was the one played inside the original
+  // user gesture — a new Audio() per iteration would get blocked after
+  // the first, gesture-linked one.
+  function playNextCandidate(text, i, audio) {
+    if (i >= VOICE_CANDIDATES.length) {
+      setSpeaking(false);
+      setDone('Done — which number sounded right?');
+      return;
+    }
+    const voice = VOICE_CANDIDATES[i];
+    setDone(`(${i + 1}/${VOICE_CANDIDATES.length}) ${voice}`);
+    const advance = () => setTimeout(() => playNextCandidate(text, i + 1, audio), 500);
+    fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&voice=${voice}&v=${TTS_CACHE_BUST}`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        const url = window.URL.createObjectURL(blob);
+        audio.src = url;
+        audio.onended = () => {
+          window.URL.revokeObjectURL(url);
+          advance();
+        };
+        audio.onerror = () => {
+          window.URL.revokeObjectURL(url);
+          advance();
+        };
+        const playPromise = audio.play();
+        if (playPromise && playPromise.catch) playPromise.catch(advance);
+      })
+      .catch(advance);
+  }
+
   function speak(text) {
     if (!text) return;
 
@@ -597,36 +653,7 @@ export default function App() {
         // fine, the element is still primed for the src swap below.
       }
 
-      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`)
-        .then((res) => {
-          if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
-          return res.blob();
-        })
-        .then((blob) => {
-          const url = window.URL.createObjectURL(blob);
-          audio.src = url;
-          audio.onended = () => {
-            setSpeaking(false);
-            window.URL.revokeObjectURL(url);
-          };
-          audio.onerror = () => {
-            setSpeaking(false);
-            window.URL.revokeObjectURL(url);
-          };
-          const playPromise = audio.play();
-          if (playPromise && playPromise.catch) {
-            playPromise.catch(() => {
-              setSpeaking(false);
-              setDone('Using device voice (playback blocked).');
-              speakWithBrowserVoice(text);
-            });
-          }
-        })
-        .catch(() => {
-          setSpeaking(false);
-          setDone('Using device voice (audio service unreachable).');
-          speakWithBrowserVoice(text);
-        });
+      playNextCandidate(text, 0, audio);
       return;
     }
 
