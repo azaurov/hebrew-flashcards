@@ -477,26 +477,12 @@ const TTS_PROXY_URL = 'https://hebrew-flashcards-tts.azaurov.workers.dev';
 // side does nothing for a returning visitor's browser cache, since the
 // request URL never changed. Bump this whenever the backend voice/provider
 // changes so the URL itself changes and old cached audio can't be reused.
-const TTS_CACHE_BUST = 'v3-google';
-
-// TEMPORARY: all 10 Google he-IL voices produced the identical "bal"-ish
-// mispronunciation for the same pointed (niqqud) text, ruling out a
-// voice-selection issue. Testing now whether the *text* is the problem —
-// full vowel pointing is unusual for real-world Hebrew, which is almost
-// always written unpointed, and TTS G2P pipelines may not handle it well.
-// Each candidate is [label, text]; voice stays fixed.
-const DEBUG_VOICE = 'he-IL-Chirp3-HD-Charon';
-const TEXT_CANDIDATES = [
-  ['pointed (current)', 'בַּר'],
-  ['unpointed', 'בר'],
-  // Same characters as "pointed (current)" but with the dagesh combining
-  // mark placed immediately after the base letter, before the vowel point
-  // -- the conventional Hebrew keyboard typing order. Unicode treats this
-  // as canonically equivalent to the current stored order (both normalize
-  // to the same NFC form), but a TTS G2P pipeline that does not apply
-  // canonical reordering before parsing might read the marks differently.
-  ['dagesh-before-vowel order', 'בַּר'],
-];
+// Switched from Google Cloud TTS to Azure Cognitive Services: all 10 of
+// Google's he-IL voices produced the same mispronunciation of a common
+// word regardless of voice or text-pointing formulation tested, and
+// Google Translate's own product (same underlying tech) reproduced it
+// too -- a confirmed limitation of Google's Hebrew TTS, not our Worker.
+const TTS_CACHE_BUST = 'v4-azure';
 
 // Mirrors the original CSS clamp(min, vw%, max) rules so glyphs scale with
 // screen width the same way the WebView version did.
@@ -593,48 +579,6 @@ export default function App() {
     window.speechSynthesis.speak(utterance);
   }
 
-  // TEMPORARY debug: plays TEXT_CANDIDATES back-to-back through the same
-  // fixed voice, labeling each on screen, to isolate whether the resh
-  // mispronunciation is caused by our source text's vowel-pointing/
-  // combining-mark formatting rather than by voice choice (all 10 Google
-  // voices tested identically on the same text, ruling that out). Reuses
-  // one <audio> element across the whole sequence (not a fresh one per
-  // candidate) because Safari/iOS only keeps an element "unlocked" for
-  // programmatic play() if it was the one played inside the original
-  // user gesture — a new Audio() per iteration would get blocked after
-  // the first, gesture-linked one. Ignores the `text` argument passed
-  // in — always tests the fixed word this round is about.
-  function playNextCandidate(_ignoredText, i, audio) {
-    if (i >= TEXT_CANDIDATES.length) {
-      setSpeaking(false);
-      setDone('Done — which number sounded right?');
-      return;
-    }
-    const [label, candidateText] = TEXT_CANDIDATES[i];
-    setDone(`(${i + 1}/${TEXT_CANDIDATES.length}) ${label}`);
-    const advance = () => setTimeout(() => playNextCandidate(_ignoredText, i + 1, audio), 500);
-    fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(candidateText)}&voice=${DEBUG_VOICE}&v=${TTS_CACHE_BUST}-${i}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
-        return res.blob();
-      })
-      .then((blob) => {
-        const url = window.URL.createObjectURL(blob);
-        audio.src = url;
-        audio.onended = () => {
-          window.URL.revokeObjectURL(url);
-          advance();
-        };
-        audio.onerror = () => {
-          window.URL.revokeObjectURL(url);
-          advance();
-        };
-        const playPromise = audio.play();
-        if (playPromise && playPromise.catch) playPromise.catch(advance);
-      })
-      .catch(advance);
-  }
-
   function speak(text) {
     if (!text) return;
 
@@ -658,11 +602,40 @@ export default function App() {
         // fine, the element is still primed for the src swap below.
       }
 
-      playNextCandidate(text, 0, audio);
+      fetch(`${TTS_PROXY_URL}/?text=${encodeURIComponent(text)}&v=${TTS_CACHE_BUST}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`TTS proxy error ${res.status}`);
+          return res.blob();
+        })
+        .then((blob) => {
+          const url = window.URL.createObjectURL(blob);
+          audio.src = url;
+          audio.onended = () => {
+            setSpeaking(false);
+            window.URL.revokeObjectURL(url);
+          };
+          audio.onerror = () => {
+            setSpeaking(false);
+            window.URL.revokeObjectURL(url);
+          };
+          const playPromise = audio.play();
+          if (playPromise && playPromise.catch) {
+            playPromise.catch(() => {
+              setSpeaking(false);
+              setDone('Using device voice (playback blocked).');
+              speakWithBrowserVoice(text);
+            });
+          }
+        })
+        .catch(() => {
+          setSpeaking(false);
+          setDone('Using device voice (audio service unreachable).');
+          speakWithBrowserVoice(text);
+        });
       return;
     }
 
-    // Native: prefer the same Google-TTS-backed proxy used on web, since
+    // Native: prefer the same Azure-TTS-backed proxy used on web, since
     // on-device voices vary wildly in Hebrew pronunciation quality across
     // manufacturers/OS versions (see the Android "hed" voice hunt, which
     // doesn't even transfer to iOS — Apple's voice identifiers use a

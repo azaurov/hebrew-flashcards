@@ -1,20 +1,20 @@
-// Cloudflare Worker: Google Cloud Text-to-Speech proxy for Hebrew Reading
+// Cloudflare Worker: Azure Cognitive Services TTS proxy for Hebrew Reading
 // Flashcards.
 //
-// Keeps GOOGLE_TTS_API_KEY server-side (set via `wrangler secret put`) so the
+// Keeps AZURE_SPEECH_KEY server-side (set via `wrangler secret put`) so the
 // static GitHub Pages site never ships a usable key in its client bundle.
 //
 // GET /?text=<hebrew> — cached at Cloudflare's edge (Cache API) so repeat
 // requests for the same flashcard word across all users cost zero quota
-// after the first fetch. Google's free tier is generous (~4M chars/month
-// standard, 1M WaveNet), but this app's ~250-word vocabulary repeats
-// constantly across users/sessions, so caching still matters.
+// after the first fetch.
 //
-// Switched from ElevenLabs: that account had zero Hebrew-tagged voices in
-// either its own library or the shared community library, so every word
-// was going through a plain American-English voice guessing at Hebrew —
-// widespread mispronunciation was the expected outcome, not a bug to
-// patch around. Google's he-IL voices are trained specifically for Hebrew.
+// Switched from Google Cloud TTS: all 10 Google he-IL voices, tested
+// against three different text-pointing formulations, produced the exact
+// same "bal"-ish mispronunciation of a common word ("בר" / "בַּר") — and
+// critically, Google Translate's own product (same underlying tech)
+// reproduces it too. That's a confirmed limitation of Google's Hebrew
+// TTS itself, not something fixable from this Worker. Azure's he-IL
+// neural voices are a different underlying stack, worth testing fresh.
 
 const ALLOWED_ORIGINS = new Set([
   "https://azaurov.github.io",
@@ -23,27 +23,14 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:8793",
 ]);
 
+const AZURE_REGION = "eastus";
 const LANGUAGE_CODE = "he-IL";
-const DEFAULT_VOICE_NAME = "he-IL-Wavenet-C";
-// Voices allowed via ?voice= for A/B testing pronunciation quality — see
-// `GET /v1/voices?languageCode=he-IL` for the full catalog.
-const ALLOWED_VOICES = new Set([
-  "he-IL-Wavenet-A",
-  "he-IL-Wavenet-B",
-  "he-IL-Wavenet-C",
-  "he-IL-Wavenet-D",
-  "he-IL-Standard-A",
-  "he-IL-Standard-B",
-  "he-IL-Standard-C",
-  "he-IL-Standard-D",
-  "he-IL-Chirp3-HD-Charon",
-  "he-IL-Chirp3-HD-Kore",
-  "he-IL-Chirp3-HD-Puck",
-  "he-IL-Chirp3-HD-Zephyr",
-]);
-// Bump on any change to voice/model/text-transform, so previously-cached
-// audio generated under the old behavior doesn't keep being served forever.
-const CACHE_VERSION = "v3-google";
+const DEFAULT_VOICE_NAME = "he-IL-AvriNeural";
+const ALLOWED_VOICES = new Set(["he-IL-AvriNeural", "he-IL-HilaNeural"]);
+// Bump on any change to voice/provider/text-transform, so previously-
+// cached audio generated under the old behavior doesn't keep being
+// served forever.
+const CACHE_VERSION = "v4-azure";
 
 function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.has(origin) ? origin : "https://azaurov.github.io";
@@ -54,11 +41,13 @@ function corsHeaders(origin) {
   };
 }
 
-function base64ToBytes(base64) {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+function escapeSsml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 export default {
@@ -82,6 +71,7 @@ export default {
 
     const requestedVoice = url.searchParams.get("voice") || "";
     const voiceName = ALLOWED_VOICES.has(requestedVoice) ? requestedVoice : DEFAULT_VOICE_NAME;
+    const gender = voiceName === "he-IL-HilaNeural" ? "Female" : "Male";
 
     // Cache key ignores Origin — the audio itself is origin-independent.
     const cacheKey = new Request(`https://cache.internal/tts/${CACHE_VERSION}/${voiceName}/${encodeURIComponent(text)}`);
@@ -95,16 +85,23 @@ export default {
       return new Response(cached.body, { headers, status: 200 });
     }
 
+    const ssml = `<speak version='1.0' xml:lang='${LANGUAGE_CODE}'><voice xml:lang='${LANGUAGE_CODE}' xml:gender='${gender}' name='${voiceName}'>${escapeSsml(text)}</voice></speak>`;
+
     const upstream = await fetch(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${env.GOOGLE_TTS_API_KEY}`,
+      `https://${AZURE_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          input: { text },
-          voice: { languageCode: LANGUAGE_CODE, name: voiceName },
-          audioConfig: { audioEncoding: "MP3", speakingRate: 0.9 },
-        }),
+        headers: {
+          "Ocp-Apim-Subscription-Key": env.AZURE_SPEECH_KEY,
+          "Content-Type": "application/ssml+xml; charset=utf-8",
+          "X-Microsoft-OutputFormat": "audio-24khz-96kbitrate-mono-mp3",
+          // Azure's Speech endpoint is itself fronted by Cloudflare, and
+          // requests from a Cloudflare Worker with no User-Agent were
+          // getting rejected by its WAF with a bodiless 400 — a normal-
+          // looking UA is enough to pass.
+          "User-Agent": "curl/8.0",
+        },
+        body: new TextEncoder().encode(ssml),
       }
     );
 
@@ -116,19 +113,11 @@ export default {
       });
     }
 
-    const { audioContent } = await upstream.json();
-    if (!audioContent) {
-      return new Response("TTS upstream returned no audio", { status: 502, headers: cors });
-    }
-    const audioBytes = base64ToBytes(audioContent);
-
-    const cacheableResponse = new Response(audioBytes, {
+    const audioBuffer = await upstream.arrayBuffer();
+    const cacheableResponse = new Response(audioBuffer, {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
-        // 30 days, not a full year+immutable: the client also appends a
-        // cache-busting `v` param it bumps on backend changes, but this is
-        // a safety net in case that's ever forgotten.
         "Cache-Control": "public, max-age=2592000",
       },
     });
@@ -137,6 +126,6 @@ export default {
     const headers = new Headers(cacheableResponse.headers);
     Object.entries(cors).forEach(([k, v]) => headers.set(k, v));
     headers.set("X-Cache", "MISS");
-    return new Response(audioBytes, { headers, status: 200 });
+    return new Response(audioBuffer, { headers, status: 200 });
   },
 };
