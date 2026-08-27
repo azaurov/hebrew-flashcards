@@ -115,6 +115,76 @@
 
   @media (max-height:640px){ .card{max-height:290px} .keys{display:none} }
   @media (prefers-reduced-motion:reduce){ .card,.fill{transition:none} }
+
+  /* ---------------- battle mode ---------------- */
+  .battleOpen{
+    flex:none;background:none;border:1px solid var(--copper);color:var(--copper);
+    font-family:var(--ui);font-size:11px;font-weight:700;letter-spacing:.06em;
+    padding:5px 11px;border-radius:999px;cursor:pointer;transition:.16s;margin-top:12px;
+  }
+  .battleOpen:hover{background:var(--copper);color:var(--ink)}
+
+  .ovl{
+    position:fixed;inset:0;background:rgba(5,10,20,.72);backdrop-filter:blur(3px);
+    display:flex;align-items:center;justify-content:center;padding:16px;z-index:50;
+  }
+  .ovl[hidden]{display:none}
+  .ovlCard{
+    position:relative;width:100%;max-width:440px;max-height:92vh;overflow-y:auto;
+    background:var(--ink-2);border:1px solid var(--rule);border-radius:16px;
+    padding:26px 22px 22px;color:var(--paper);
+  }
+  .ovlClose{
+    position:absolute;top:10px;right:12px;background:none;border:0;color:var(--muted);
+    font-size:22px;line-height:1;cursor:pointer;padding:4px;
+  }
+  .ovlClose:hover{color:var(--paper)}
+  .bTitle{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--copper);font-weight:700;margin-bottom:14px}
+  .bRow{display:flex;gap:8px;margin-top:10px}
+  .bField{flex:1;display:flex;flex-direction:column;gap:6px}
+  .bField label{font-size:11px;color:var(--muted);letter-spacing:.04em}
+  .bField input,.bField select{
+    font-family:var(--ui);font-size:15px;padding:10px 11px;border-radius:8px;
+    border:1px solid var(--rule);background:var(--ink);color:var(--paper);
+  }
+  .bField input:focus,.bField select:focus{outline:2px solid var(--accent-soft);outline-offset:1px}
+  .bBtn{
+    font-family:var(--ui);font-size:14px;font-weight:600;padding:12px 14px;border-radius:10px;
+    cursor:pointer;border:1px solid var(--rule);background:var(--accent);color:#fff;transition:.16s;
+  }
+  .bBtn:hover{filter:brightness(1.08)}
+  .bBtn:disabled{opacity:.4;cursor:default}
+  .bBtn.ghost{background:none;color:var(--muted);border-color:var(--rule)}
+  .bBtn.ghost:hover{color:var(--paper);border-color:var(--accent-soft)}
+  .bMsg{font-size:12.5px;color:var(--copper);min-height:16px;margin-top:8px}
+  .bCode{
+    font-family:var(--ui);font-size:30px;font-weight:700;letter-spacing:.14em;
+    text-align:center;color:var(--paper);margin:6px 0 4px;
+  }
+  .bHint{font-size:12px;color:var(--muted);text-align:center;line-height:1.5}
+  .bPlayers{display:flex;gap:10px;margin-top:16px}
+  .bSlot{flex:1;border:1px solid var(--rule);border-radius:10px;padding:10px 12px;text-align:center}
+  .bSlot .nm{font-size:13.5px;font-weight:600;color:var(--paper)}
+  .bSlot .st{font-size:11px;color:var(--muted);margin-top:3px}
+  .bSlot.on{border-color:var(--accent)}
+  .bSlot.off .nm{color:var(--muted)}
+  .bTimer{font-size:34px;font-weight:700;text-align:center;color:var(--accent-soft);font-variant-numeric:tabular-nums;margin:4px 0 14px}
+  .bGlyph{font-family:var(--hebrew);direction:rtl;font-size:clamp(48px,15vw,70px);text-align:center;color:#fff;margin-bottom:6px}
+  .bScoreRow{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:14px}
+  .bScoreRow b{color:var(--paper)}
+  .bOpts{display:flex;flex-direction:column;gap:8px}
+  .bOpt{
+    font-family:var(--ui);font-size:14.5px;text-align:start;padding:13px 14px;border-radius:10px;
+    border:1px solid var(--rule);background:var(--ink);color:var(--paper);cursor:pointer;transition:.14s;
+  }
+  .bOpt:hover{border-color:var(--accent-soft)}
+  .bOpt.right{border-color:#3FA56B;background:rgba(63,165,107,.18)}
+  .bOpt.wrong{border-color:#C85C4B;background:rgba(200,92,75,.18)}
+  .bOpt:disabled{cursor:default}
+  .bResult{text-align:center;margin:6px 0 4px}
+  .bResult .who{font-size:20px;font-weight:700;color:var(--paper)}
+  .bResult .why{font-size:12.5px;color:var(--muted);margin-top:4px}
+  .bFinalScores{display:flex;gap:10px;margin:18px 0}
 </style>
 </head>
 <body>
@@ -123,7 +193,15 @@
   <div class="title">Hebrew Reading Flashcards</div>
   <div class="sub">The New Reading Hebrew &middot; <b id="total">vocabulary</b></div>
   <div class="decks" role="tablist" id="decks"></div>
+  <button class="battleOpen" id="battleOpen" type="button">&#9876; Battle mode</button>
 </header>
+
+<div class="ovl" id="battleOvl" hidden>
+  <div class="ovlCard">
+    <button class="ovlClose" id="battleClose" type="button" aria-label="Close battle mode">&times;</button>
+    <div id="battleBody"></div>
+  </div>
+</div>
 
 <div class="rail">
   <button class="dir" id="dir" type="button">עב &rarr; EN</button>
@@ -680,6 +758,239 @@ document.addEventListener('keydown', e=>{
 });
 
 load();
+
+/* ============================ BATTLE MODE ============================ */
+const BATTLE_HTTP = 'https://hebrew-flashcards-battle.azaurov.workers.dev';
+const BATTLE_WS = 'wss://hebrew-flashcards-battle.azaurov.workers.dev/ws';
+
+const BATTLE_DECK_KEYS = Object.keys(DECKS).filter(k =>
+  DECKS[k].vocab && !PHRASE_DECKS.includes(k) && DECKS[k].cards.length >= 8
+);
+
+let B = {
+  screen: 'home', // home | lobby | playing | over
+  ws: null, code: null, name: '', role: null, token: null,
+  room: null, match: null, card: null, gameOver: null,
+  answeredLock: false, lastFeedback: null, error: null,
+  leaving: false, timerInterval: null
+};
+
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function errorBanner(){
+  if(!B.error) return '';
+  const canReconnect = B.error==='Connection lost.' && B.token;
+  return '<div class="bMsg">'+escapeHtml(B.error)+
+    (canReconnect ? '<div class="bRow"><button class="bBtn ghost" id="bReconnect" type="button" style="flex:1">Reconnect</button></div>' : '')+
+    '</div>';
+}
+
+function battleHome(){
+  return ''+
+    '<div class="bTitle">Battle Mode</div>'+
+    '<div class="bField"><label>Your name</label><input id="bName" maxlength="20" value="'+escapeHtml(B.name)+'" placeholder="Player"></div>'+
+    '<div class="bRow"><button class="bBtn" id="bCreate" type="button" style="flex:1">Create room</button></div>'+
+    '<div class="bHint" style="margin-top:14px">&mdash; or join a friend&rsquo;s room &mdash;</div>'+
+    '<div class="bRow"><div class="bField"><label>Room code</label><input id="bCode" maxlength="8" style="text-transform:uppercase" placeholder="ABCDE"></div></div>'+
+    '<div class="bRow"><button class="bBtn ghost" id="bJoin" type="button" style="flex:1">Join room</button></div>'+
+    errorBanner();
+}
+
+function battleLobby(){
+  const r = B.room;
+  if(!r) return '<div class="bTitle">Room '+escapeHtml(B.code)+'</div><div class="bHint">Connecting&hellip;</div>'+errorBanner();
+  const isHost = B.role==='host';
+  const hostSlot = r.host, guestSlot = r.guest;
+  const slotHtml = (slot,label) => '<div class="bSlot '+(slot?'on':'off')+'"><div class="nm">'+(slot?escapeHtml(slot.name):'&mdash;')+
+    '</div><div class="st">'+label+(slot?(slot.connected?'':' &middot; reconnecting&hellip;'):' &middot; waiting')+'</div></div>';
+  const deckOptions = BATTLE_DECK_KEYS.map(k=>'<option value="'+k+'">'+DECKS[k].label+' ('+DECKS[k].cards.length+')</option>').join('');
+  const hostControls = ''+
+    '<div class="bRow"><div class="bField"><label>Deck</label><select id="bDeck">'+deckOptions+'</select></div></div>'+
+    '<div class="bRow"><div class="bField"><label>Time limit</label><select id="bDuration">'+
+      '<option value="30">30s</option><option value="60" selected>60s</option><option value="90">90s</option><option value="120">120s</option>'+
+    '</select></div></div>'+
+    '<div class="bRow"><button class="bBtn" id="bStart" type="button" '+((!guestSlot||!guestSlot.connected)?'disabled':'')+'>Start battle</button></div>';
+  const guestWaiting = '<div class="bHint" style="margin-top:14px">'+
+    (r.deckLabel ? 'Host picked &ldquo;'+escapeHtml(r.deckLabel)+'&rdquo; ('+r.cardCount+' cards). Waiting for host to start&hellip;' : 'Waiting for the host to pick a deck&hellip;')+
+    '</div>';
+  return ''+
+    '<div class="bTitle">Room</div>'+
+    '<div class="bCode">'+escapeHtml(B.code)+'</div>'+
+    '<div class="bHint">Share this code with your opponent.</div>'+
+    '<div class="bPlayers">'+slotHtml(hostSlot,'Host')+slotHtml(guestSlot,'Guest')+'</div>'+
+    (isHost ? hostControls : guestWaiting)+
+    errorBanner()+
+    '<div class="bRow"><button class="bBtn ghost" id="bLeave" type="button" style="flex:1">Leave room</button></div>';
+}
+
+function battlePlaying(){
+  const r = B.room||{};
+  const card = B.card;
+  const mySlot = B.role==='host' ? r.host : r.guest;
+  const oppSlot = B.role==='host' ? r.guest : r.host;
+  const oppLabel = B.role==='host' ? 'Guest' : 'Host';
+  const feedback = B.lastFeedback===true ? '<div class="bMsg" style="color:#3FA56B">Correct!</div>'
+    : B.lastFeedback===false ? '<div class="bMsg" style="color:#C85C4B">Not quite.</div>'
+    : '<div class="bMsg">&nbsp;</div>';
+  return ''+
+    '<div class="bTitle">'+escapeHtml(r.deckLabel||'Battle')+'</div>'+
+    '<div class="bTimer" id="bTimer">&hellip;</div>'+
+    '<div class="bScoreRow"><span>You: <b>'+(mySlot?mySlot.correct:0)+'</b> correct</span><span>'+oppLabel+': <b>'+(oppSlot?oppSlot.correct:0)+'</b> correct</span></div>'+
+    (card ? (
+      '<div class="bGlyph">'+card.front+'</div>'+
+      '<div class="bOpts" id="bOpts">'+card.options.map((t,i)=>'<button class="bOpt" data-i="'+i+'" type="button">'+escapeHtml(t)+'</button>').join('')+'</div>'
+    ) : '<div class="bHint">Loading next card&hellip;</div>')+
+    feedback;
+}
+
+function battleOver(){
+  const g = B.gameOver || (B.room && B.room.status==='ended' ? {winner:B.room.winner, reason:B.room.endReason, host:B.room.host, guest:B.room.guest} : null);
+  if(!g) return '<div class="bHint">Match ended.</div>';
+  const tie = g.winner==='tie';
+  const who = tie ? "It&rsquo;s a tie!" : (g.winner===B.role ? 'You win!' : (g.winner==='host'?g.host.name:g.guest.name)+' wins!');
+  const why = g.reason==='forfeit' ? 'Opponent disconnected.' : g.reason==='time_up' ? "Time&rsquo;s up." : '';
+  return ''+
+    '<div class="bTitle">Battle Over</div>'+
+    '<div class="bResult"><div class="who">'+who+'</div><div class="why">'+why+'</div></div>'+
+    '<div class="bFinalScores">'+
+      '<div class="bSlot on"><div class="nm">'+escapeHtml(g.host.name)+'</div><div class="st">'+g.host.correct+' correct &middot; '+g.host.wrong+' wrong</div></div>'+
+      '<div class="bSlot on"><div class="nm">'+escapeHtml(g.guest.name)+'</div><div class="st">'+g.guest.correct+' correct &middot; '+g.guest.wrong+' wrong</div></div>'+
+    '</div>'+
+    (B.role==='host' ? '<div class="bRow"><button class="bBtn" id="bRematch" type="button" style="flex:1">Play again</button></div>' : '<div class="bHint">Waiting for host to start a rematch&hellip;</div>')+
+    '<div class="bRow"><button class="bBtn ghost" id="bLeave" type="button" style="flex:1">Leave room</button></div>';
+}
+
+function renderBattle(){
+  const body = el('battleBody');
+  if(B.screen==='home') body.innerHTML = battleHome();
+  else if(B.screen==='lobby') body.innerHTML = battleLobby();
+  else if(B.screen==='playing') body.innerHTML = battlePlaying();
+  else body.innerHTML = battleOver();
+  wireBattleScreen();
+}
+
+function sendSelectDeck(){
+  const sel = document.getElementById('bDeck');
+  if(!sel || !B.ws) return;
+  const key = sel.value;
+  const cards = DECKS[key].cards.map(c=>({front:c.front, mean:c.mean, translit:c.translit, size:c.size||'md'}));
+  B.ws.send(JSON.stringify({type:'select_deck', deckKey:key, deckLabel:DECKS[key].label, cards}));
+}
+
+function wireBattleScreen(){
+  const g = id => document.getElementById(id);
+  if(g('bCreate')) g('bCreate').onclick = ()=>{
+    B.name = (g('bName').value||'Player').trim().slice(0,20) || 'Player';
+    B.error = null;
+    fetch(BATTLE_HTTP+'/api/room', {method:'POST'})
+      .then(r=>r.json())
+      .then(d=> connect(d.code, null))
+      .catch(()=>{ B.error = 'Could not reach the battle server.'; renderBattle(); });
+  };
+  if(g('bJoin')) g('bJoin').onclick = ()=>{
+    B.name = (g('bName').value||'Player').trim().slice(0,20) || 'Player';
+    const code = (g('bCode').value||'').trim().toUpperCase();
+    if(!/^[A-Z0-9]{4,8}$/.test(code)){ B.error = 'Enter a valid room code.'; renderBattle(); return; }
+    B.error = null;
+    connect(code, null);
+  };
+  if(g('bDeck')){
+    g('bDeck').onchange = sendSelectDeck;
+    if(B.role==='host' && B.room && !B.room.deckLabel) sendSelectDeck();
+  }
+  if(g('bStart')) g('bStart').onclick = ()=>{
+    const duration = Number(g('bDuration').value) || 60;
+    B.ws.send(JSON.stringify({type:'start', duration}));
+  };
+  if(g('bLeave')) g('bLeave').onclick = leaveBattle;
+  if(g('bRematch')) g('bRematch').onclick = ()=> B.ws.send(JSON.stringify({type:'rematch'}));
+  if(g('bReconnect')) g('bReconnect').onclick = ()=> connect(B.code, B.token);
+  if(g('bOpts')){
+    Array.from(g('bOpts').children).forEach(btn=>{
+      btn.onclick = ()=>{
+        if(B.answeredLock) return;
+        B.answeredLock = true;
+        Array.from(g('bOpts').children).forEach(b=>b.disabled=true);
+        B.ws.send(JSON.stringify({type:'answer', choice: Number(btn.dataset.i)}));
+      };
+    });
+  }
+}
+
+function startBattleTimer(){
+  stopBattleTimer();
+  B.timerInterval = setInterval(()=>{
+    const t = document.getElementById('bTimer');
+    if(!t || !B.match) return;
+    const remain = Math.max(0, Math.ceil((B.match.endTime-Date.now())/1000));
+    t.textContent = remain+'s';
+  }, 250);
+}
+function stopBattleTimer(){
+  if(B.timerInterval){ clearInterval(B.timerInterval); B.timerInterval=null; }
+}
+
+function connect(code, token){
+  B.code = code; B.leaving = false;
+  const url = BATTLE_WS+'?code='+encodeURIComponent(code)+'&name='+encodeURIComponent(B.name||'Player')+(token?'&token='+encodeURIComponent(token):'');
+  const ws = new WebSocket(url);
+  B.ws = ws;
+  ws.onmessage = onBattleMessage;
+  ws.onclose = ()=>{ if(!B.leaving){ B.error = 'Connection lost.'; renderBattle(); } };
+  B.screen = 'lobby';
+  renderBattle();
+}
+
+function onBattleMessage(ev){
+  let msg;
+  try{ msg = JSON.parse(ev.data); } catch(e){ return; }
+
+  if(msg.type==='joined'){
+    B.role = msg.role; B.token = msg.token; B.error = null;
+  } else if(msg.type==='room_state'){
+    B.room = msg;
+    if(msg.status==='waiting' && (B.screen==='playing'||B.screen==='over')){
+      B.screen='lobby'; B.gameOver=null; B.match=null; B.card=null; B.lastFeedback=null; stopBattleTimer();
+    } else if(msg.status==='playing' && B.screen==='lobby'){
+      B.screen='playing';
+      if(!B.match) B.match = {duration:msg.duration, endTime:msg.endTime, totalCards:msg.cardCount};
+      startBattleTimer();
+    } else if(msg.status==='ended' && B.screen!=='over'){
+      B.screen='over';
+      if(!B.gameOver) B.gameOver = {winner:msg.winner, reason:msg.endReason, host:msg.host, guest:msg.guest};
+      stopBattleTimer();
+    }
+    B.error = null;
+  } else if(msg.type==='error'){
+    B.error = msg.message;
+  } else if(msg.type==='match_start'){
+    B.match = {duration:msg.duration, endTime:msg.endTime, totalCards:msg.totalCards};
+    B.screen='playing'; B.lastFeedback=null;
+    startBattleTimer();
+  } else if(msg.type==='card'){
+    B.card = {front:msg.front, size:msg.size, options:msg.options};
+    B.answeredLock = false;
+    B.lastFeedback = (typeof msg.lastCorrect==='boolean') ? msg.lastCorrect : null;
+  } else if(msg.type==='game_over'){
+    B.gameOver = msg; B.screen='over'; stopBattleTimer();
+  }
+  renderBattle();
+}
+
+function leaveBattle(){
+  B.leaving = true;
+  if(B.ws) B.ws.close();
+  B.ws=null; B.code=null; B.role=null; B.token=null; B.room=null;
+  B.match=null; B.card=null; B.gameOver=null; B.error=null; B.lastFeedback=null;
+  stopBattleTimer();
+  B.screen = 'home';
+  renderBattle();
+}
+
+el('battleOpen').onclick = ()=>{ el('battleOvl').hidden=false; renderBattle(); };
+el('battleClose').onclick = ()=>{ el('battleOvl').hidden=true; };
 </script>
 </body>
 </html>

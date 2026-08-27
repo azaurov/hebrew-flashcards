@@ -1,0 +1,11 @@
+name = "hebrew-flashcards-battle"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[durable_objects.bindings]]
+name = "BATTLE_ROOM"
+class_name = "BattleRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BattleRoom"]
